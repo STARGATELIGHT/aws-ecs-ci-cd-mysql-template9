@@ -10,17 +10,20 @@ jobs:
   checkout:
     name: Checkout Code
     runs-on: ubuntu-latest
+    outputs:
+      source-code: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
       - name: Upload source code artifact
-        uses: actions/upload-artifact@v3
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: source-code
           path: .
 
   test:
-    name: Run Tests
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     needs: checkout
     services:
@@ -38,13 +41,22 @@ jobs:
           --health-retries=5
     steps:
       - name: Download source code
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: source-code
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
+      - name: Cache Node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
       - run: npm install
       - run: npm test
         env:
@@ -59,15 +71,27 @@ jobs:
     needs: test
     steps:
       - name: Download source code
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: source-code
-      - name: Install dependencies
-        run: npm install
-      - name: Build app
-        run: npm run build
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - name: Cache Node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - run: npm install
+      - run: npm run build
       - name: Upload build artifact
-        uses: actions/upload-artifact@v3
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
           name: build
           path: ./build
@@ -78,7 +102,7 @@ jobs:
     needs: build
     steps:
       - name: Download build artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
       - name: Copy build to Docker context
@@ -87,8 +111,16 @@ jobs:
           cp -r build/* docker-context/
           cp Dockerfile docker-context/
           cp package*.json docker-context/
-      - name: Build Docker Image
-        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:latest docker-context/
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Cache Docker layers
+        uses: docker/build-push-action@v4
+        with:
+          context: docker-context/
+          push: false
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:cache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:cache,mode=max
 
   docker-push:
     name: Push Docker Image
@@ -102,3 +134,4 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Push Docker Image
         run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:latest
+
