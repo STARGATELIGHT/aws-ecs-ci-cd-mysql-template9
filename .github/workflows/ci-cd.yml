@@ -2,18 +2,25 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   checkout:
+    name: Checkout Code
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout repository
         uses: actions/checkout@v3
+      - name: Upload source code artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: source-code
+          path: .
 
-  tests:
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
     needs: checkout
     services:
@@ -30,8 +37,11 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Node.js
+      - name: Download source code
+        uses: actions/download-artifact@v3
+        with:
+          name: source-code
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
@@ -43,19 +53,48 @@ jobs:
           DB_PASSWORD: password
           DB_NAME: testdb
 
-  docker-build:
+  build:
+    name: Build Application
     runs-on: ubuntu-latest
-    needs: tests
+    needs: test
     steps:
-      - uses: actions/checkout@v3
+      - name: Download source code
+        uses: actions/download-artifact@v3
+        with:
+          name: source-code
+      - name: Install dependencies
+        run: npm install
+      - name: Build app
+        run: npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build
+          path: ./build
+
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: build
+      - name: Copy build to Docker context
+        run: |
+          mkdir -p docker-context
+          cp -r build/* docker-context/
+          cp Dockerfile docker-context/
+          cp package*.json docker-context/
       - name: Build Docker Image
-        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:latest .
+        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/node-mysql-app:latest docker-context/
 
   docker-push:
+    name: Push Docker Image
     runs-on: ubuntu-latest
     needs: docker-build
     steps:
-      - uses: actions/checkout@v3
       - name: Log in to DockerHub
         uses: docker/login-action@v2
         with:

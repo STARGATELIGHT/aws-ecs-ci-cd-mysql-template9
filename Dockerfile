@@ -1,11 +1,17 @@
+# Dockerfile
 FROM node:18-alpine
 
 WORKDIR /usr/src/app
 
+# Copy only package.json to install production dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --only=production
 
-COPY . .
+# Copy pre-built application
+COPY build/ ./build
 
 EXPOSE 3000
-CMD ["node", "app.js"]
+
+# Run the built app
+CMD ["node", "build/app.js"]
+
